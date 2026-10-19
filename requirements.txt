@@ -1,0 +1,10 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9
+aiofiles>=23.2
+Pillow>=10.0
+numpy>=1.24
+opencv-python>=4.8
+reportlab>=4.0
+pytesseract>=0.3.10
+pydantic>=2.5

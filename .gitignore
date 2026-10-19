@@ -1,0 +1,39 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# ---- 运行/调试产物 ----
+logs/
+*.log
+newspaper_reader/test/out/
+newspaper_reader/test/pages/
+newspaper_reader/test/.cache/
+runtime/
+.runtime/
+
+# ---- 编辑器 / IDE ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---- 操作系统 ----
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# ---- 其它 ----
+*.tmp
+*.bak

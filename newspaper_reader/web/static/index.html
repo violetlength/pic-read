@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图片文字阅读器 · 拍照生成可搜索 PDF</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="masthead">
+  <div class="mast-inner">
+    <div class="mast-left">
+      <h1>图片文字阅读器</h1>
+      <p class="tagline">随手拍的文字图片 → 摆正增白成清晰的扫描 PDF · 可搜索 · 可下载 · 可回看历史</p>
+    </div>
+    <div class="mast-right">
+      <button class="btn ghost" id="libBtn" type="button">阅读历史</button>
+      <span class="badge" id="healthBadge" title="转换时的文字识别引擎（Tesseract OCR）。显示“就绪”即可正常识别；若提示未找到，请检查安装。">识别引擎检测中…</span>
+    </div>
+  </div>
+  <div class="rule thick"></div>
+  <div class="rule thin"></div>
+</header>
+
+<main>
+  <nav class="steps" id="steps" aria-label="使用流程">
+    <span class="steps-label">一、流程 ① 上传图片 → ② 调整顺序、方向、开始转换 → ③ 阅读 / 下载
+</span>
+  </nav>
+  
+
+  <!-- 第 1 步：上传 -->
+  <section class="panel" id="dropPanel">
+    <div class="drop" id="drop">
+      <div class="drop-inner">
+        <div class="drop-icon">▤</div>
+        <p class="drop-title">拖入文字图片，或点击选择</p>
+        <p class="drop-sub">支持 JPG / PNG / WEBP / BMP / TIFF，可多选 · 手机随手拍、扫描件、截图都可以</p>
+        <input type="file" id="fileInput" accept="image/*" multiple hidden>
+        <button class="btn primary" id="pickBtn" type="button">选择图片</button>
+        <p class="up-msg" id="upMsg"></p>
+      </div>
+    </div>
+    <p class="step-hint hidden" id="backHint">当前已有上传内容：重新选择图片会覆盖这一批（原批次将被丢弃）。</p>
+  </section>
+
+  <!-- 第 2 步：转换 -->
+  <section class="panel hidden" id="pagesPanel">
+    <div class="panel-head">
+      <h2>已上传图片 <span class="count" id="pageCount">0</span></h2>
+      <div class="panel-actions">
+        <button class="btn ghost" id="clearBtn" type="button">清空</button>
+        <button class="btn primary" id="convertBtn" type="button">开始转换</button>
+      </div>
+    </div>
+<span class="steps-label">二、调整顺序、方向、然后点击开始转换</span>
+    <div class="options">
+      <p class="opt-hint">转换方式（已固定为最佳设置）：透视摆正 → 去阴影 · 增白 · 锐化（彩色增强）→ 各页合并为一个 PDF，页面保留原图外观（排版、插图、字体都不动）并叠加可搜索文字层，效果与扫描类 App 一致。</p>
+    </div>
+
+    <div class="progress hidden" id="progressWrap">
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      <p class="progress-text" id="progressText">准备中…</p>
+    </div>
+
+    <p class="grid-tip">点击图片可放大预览、旋转摆正；按住图片右上角的 ⠿ 拖动可调整顺序（顺序即转换后的页面顺序）。</p>
+    <div class="grid" id="grid"></div>
+    <div class="logbox hidden" id="logBox"><pre id="log"></pre></div>
+  </section>
+
+  <!-- 第 3 步：阅读 / 下载 -->
+  <section class="panel hidden" id="resultPanel">
+    <div class="panel-head">
+      <div class="read-head">
+        <h2 id="readTitle">阅读</h2>
+        <p class="read-sub" id="readMeta"></p>
+      </div>
+      <div class="panel-actions">
+        <select id="docSelect" class="hidden" aria-label="选择文档"></select>
+        <a class="btn ghost" id="dlPdf" href="#" download>下载 PDF</a>
+        <a class="btn ghost hidden" id="zipBtn" href="#" download>下载全部 ZIP</a>
+        <button class="btn primary" id="newBatchBtn" type="button">再转一批</button>
+      </div>
+    </div>
+
+    <div class="reader" id="reader">
+      <div class="reader-stage" id="readerStage" data-fit="w">
+        <p class="reader-hint hidden" id="readerHint">载入页面…</p>
+        <img id="readerImg" alt="页面">
+      </div>
+      <div class="reader-bar">
+        <div class="grp">
+          <button class="btn small" id="prevBtn" type="button">‹ 上一页</button>
+          <input class="page-input" id="pageInput" inputmode="numeric" value="1" aria-label="页码">
+          <span class="page-total" id="pageTotal">/ 1</span>
+          <button class="btn small" id="nextBtn" type="button">下一页 ›</button>
+        </div>
+        <div class="grp">
+          <button class="btn small ghost active" id="fitWBtn" type="button">适宽</button>
+          <button class="btn small ghost" id="fitPBtn" type="button">适合页</button>
+          <span class="read-pos" id="readPos"></span>
+        </div>
+      </div>
+      <div class="read-progress"><div class="read-progress-fill" id="readProgressFill"></div></div>
+    </div>
+  </section>
+</main>
+
+<!-- 阅读历史 -->
+<div class="modal hidden" id="libModal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <div>
+        <h3>阅读历史</h3>
+        <p class="modal-sub" id="libSub">本机保存的转换结果</p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="libClearBtn" type="button">清空全部</button>
+        <button class="btn ghost" id="libCloseBtn" type="button">关闭</button>
+      </div>
+    </div>
+    <div class="modal-body" id="libList"></div>
+  </div>
+</div>
+
+<!-- 图片预览 / 旋转 -->
+<div class="modal hidden" id="viewModal">
+  <div class="modal-box view-box">
+    <div class="modal-head">
+      <div>
+        <h3 id="viewTitle">图片预览</h3>
+        <p class="modal-sub" id="viewSub"></p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost small" id="rotCcw" type="button">↺ 向左转</button>
+        <button class="btn ghost small" id="rotCw" type="button">↻ 向右转</button>
+        <button class="btn primary small" id="viewCloseBtn" type="button">完成</button>
+      </div>
+    </div>
+    <div class="view-stage" id="viewStage">
+      <button class="view-arrow left" id="viewPrev" type="button" aria-label="上一张">‹</button>
+      <img id="viewImg" alt="图片预览">
+      <button class="view-arrow right" id="viewNext" type="button" aria-label="下一张">›</button>
+    </div>
+    <div class="view-foot">
+      <span id="viewPos"></span>
+      <span class="view-tip">← → 切换图片 · 旋转会保存并影响转换结果 · Esc 关闭</span>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <div class="rule thin"></div>
+  <p><b>扫描件美化</b>：透视摆正 → 去阴影、增白、锐化（彩色增强）→ 各页合并为一个 PDF，页面保留原图外观（排版、插图、字体都不动），并叠加可搜索文字层，与扫描类 App 的效果一致。每次转换完成的文档会自动进入「阅读历史」，只保留你满意的版本。</p>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>
