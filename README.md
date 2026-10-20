@@ -23,6 +23,8 @@ pip install -r requirements.txt
 
 浏览器里看到「图片文字阅读器」标题、右上角徽标变绿显示 **识别引擎就绪 · chi_sim**，就可以开始用了。关闭服务双击 `stop.bat`。
 
+> `start.bat` 会先做启动前检查（Python 版本、依赖、Tesseract、端口），**不满足条件时窗口会停住并给出具体原因和修复命令**，不会一闪而过；有问题也可以单独运行 `start.bat --check` 只做检查。
+
 ## 怎么用
 
 界面只有三步，页顶那行「① 上传图片 → ② 调整顺序、方向、开始转换 → ③ 阅读 / 下载」就是操作顺序。
@@ -82,12 +84,25 @@ pip install -r requirements.txt
 
 ## 启动与停止
 
-Windows 一键脚本（双击即可；不加参数时窗口会停在"按任意键继续"，方便看提示）：
+`start.bat` 双击即可。它在启动前会逐项检查，任何一项不满足都会**停住窗口**（不会闪退）并告诉你原因：
 
-| 脚本 | 说明 |
+1. **Python**：找到真实的 Python 3.11+（自动跳过 Microsoft Store 的 `python.exe` 占位符，找不到 `python` 时回退到 `py` 启动器），过旧/跑不起来都会提示。
+2. **依赖**：实际 `import` 一遍 fastapi / uvicorn / Pillow / OpenCV / reportlab / pytesseract / pymupdf 等，缺什么就打印缺的模块名，并给出本机对应的安装命令。
+3. **Tesseract**：按 `TESSERACT_CMD` → `C:\Program Files\Tesseract-OCR\` → `PATH` 顺序查找；找不到只**警告**（服务仍可启动、可看阅读历史，但转换没有文字层），不会阻断。
+4. **端口 8765**：空闲则启动；已是本程序在跑则直接打开浏览器；被**其它程序**占用则明确报错并建议换端口（不会误连、不会误杀）。
+5. **启动结果**：等端口就绪即报成功；若进程秒退或 30 秒没起来，会直接把 `logs\server.log` 的最后 20 行贴出来（通常就是真正的报错，如 `ModuleNotFoundError`）。
+
+| 脚本 / 参数 | 说明 |
 | --- | --- |
-| `start.bat` | 端口已在监听则直接提示；否则后台（最小化窗口）启动服务并做健康检查，成功后自动打开浏览器。日志：`logs\server.log`。参数 `--no-open` / `--quiet`：不打开浏览器、不暂停 |
-| `stop.bat` | 结束监听 8765 端口的进程（多进程也会全部结束）；无服务时提示。带任意参数（如 `--quiet`）则不暂停 |
+| `start.bat` | 检查环境 → 启动服务 → 自动打开浏览器；结束后窗口停住 |
+| `start.bat --check` | 只检查环境（Python / 依赖 / Tesseract / 端口），不启动 |
+| `start.bat --no-open` · `--quiet` | 启动但不打开浏览器、不暂停（便于脚本调用） |
+| `start.bat --help` | 查看参数说明 |
+| `stop.bat` | 停止本程序的服务；**端口被其它程序占用时不做任何操作**（会列出占用进程） |
+| `stop.bat --force` | 强制结束占用 8765 的程序（有风险，确认后用） |
+| `stop.bat --quiet` | 不暂停，用返回码表示结果（0 成功 / 1 失败） |
+
+日志：`logs\server.log`（服务输出与报错，每次启动覆盖）、`logs\server.stdout`（标准输出）。
 
 两个脚本默认 `HOST=127.0.0.1`、`PORT=8765`（只监听本机，仅供本机浏览器访问），要改端口请同时调整脚本内的 `PORT` 与启动命令。
 
@@ -99,7 +114,9 @@ python -m newspaper_reader --open            # 默认 http://127.0.0.1:8765
 python -m newspaper_reader --port 9000       # 换端口
 ```
 
-启动后保持这个服务窗口/后台进程运行，浏览器里就能正常用；用完可让服务继续挂着（下次打开浏览器直接刷新即可），或运行 `stop.bat` 关掉。
+启动后服务在后台运行，浏览器里就能正常用；用完可让服务继续挂着（下次打开浏览器直接刷新即可），或运行 `stop.bat` 关掉。
+
+> 维护提示：`start.bat` / `stop.bat` 用 **GBK（ANSI）+ CRLF** 保存（中文提示在 cmd 里才不乱码）。编辑这两个文件时请保持该编码与行尾，不要另存为 UTF-8。
 
 ## 输出文件与数据位置
 
@@ -116,8 +133,11 @@ python -m newspaper_reader --port 9000       # 换端口
 
 ## 常见问题
 
-- **双击 start.bat 提示端口已占用**：说明服务已经在跑，直接打开 <http://127.0.0.1:8765> 即可；确实要重启就先运行 `stop.bat`。
-- **启动失败**：看 `logs\server.log`；刚启动时提示服务未就绪也看这个日志。
+- **双击 start.bat 后窗口一闪就没了**：现在不会这样了——脚本在每一步失败时都会 `pause` 停住并打印原因。如果仍然闪退，通常是 `start.bat` 被改过（编码不是 GBK/ANSI，或行尾不是 CRLF），恢复原文件即可；也可以手动在 cmd 里运行 `start.bat --check` 看输出。
+- **提示"端口 8765 已被其它程序占用"**：不是本服务占的，脚本不会去动它。关掉占用的程序（脚本没有显示进程名时可用 `Get-NetTCPConnection -LocalPort 8765` 查），或改用 `python -m newspaper_reader --port 9000`。
+- **提示"服务已在运行"**：直接打开 <http://127.0.0.1:8765> 即可；确实要重启就先运行 `stop.bat`。
+- **提示"Python 依赖不完整"**：按屏幕上给出的那条 `pip install -r requirements.txt` 命令执行（注意用同一个 Python；脚本会打印它的完整路径）。
+- **启动失败 / 服务秒退**：脚本会把 `logs\server.log` 最后 20 行贴出来，基本就是根因（常见：依赖装到了另一个 Python 上、端口被占、Tesseract 路径不对）。
 - **徽标红色「识别引擎未就绪」**：Tesseract 没装好或路径不对。确认 `C:\Program Files\Tesseract-OCR\tesseract.exe` 存在且 `tessdata\chi_sim.traineddata` 在，或用 `TESSERACT_CMD` / `TESSDATA_DIR` 指到正确位置，然后重启服务。
 - **中文识别不出来 / 乱码**：多半是图片太糊、太小或严重倾斜。建议重拍（正对、光线足、占满画面），或在第 2 步手动旋转摆正后重新转换。
 - **页面看起来像图片，复制出来的文字不对**：文字层由 OCR 生成，识别不准时文字层会跟着不准；不影响阅读观感。

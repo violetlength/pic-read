@@ -1,54 +1,230 @@
 @echo off
-chcp 65001 >nul
+chcp 936 >nul
 setlocal EnableExtensions
-cd /d "%~dp0"
+pushd "%~dp0" 2>nul
+if errorlevel 1 goto :no_dir
 
 set "HOST=127.0.0.1"
 set "PORT=8765"
 set "BASE=http://%HOST%:%PORT%"
+set "LOGDIR=%CD%\logs"
+set "LOG=%LOGDIR%\server.log"
 set "RC=0"
 set "OPEN=1"
 set "QUIET=0"
-if /i "%~1"=="--no-open" (set "OPEN=0" & set "QUIET=1")
-if /i "%~1"=="--quiet" (set "OPEN=0" & set "QUIET=1")
+set "CHECK=0"
 
-if not exist "logs" mkdir "logs"
+:parse
+if "%~1"=="" goto :parsed
+set "KNOWN=0"
+if /i "%~1"=="--quiet" (set "OPEN=0" & set "QUIET=1" & set "KNOWN=1")
+if /i "%~1"=="--no-open" (set "OPEN=0" & set "QUIET=1" & set "KNOWN=1")
+if /i "%~1"=="--check" (set "CHECK=1" & set "KNOWN=1")
+if /i "%~1"=="-h" goto :usage
+if /i "%~1"=="--help" goto :usage
+if "%KNOWN%"=="0" (set "BADARG=%~1" & goto :bad_arg)
+shift
+goto :parse
+:parsed
 
-set "PY="
-where python >nul 2>nul
-if not errorlevel 1 set "PY=python"
-if not defined PY (
-  where py >nul 2>nul
-  if not errorlevel 1 set "PY=py"
-)
-if not defined PY (
-  echo [ERROR] æœªæ‰¾åˆ° pythonï¼Œè¯·å…ˆå®‰è£…å¹¶åŠ å…¥ PATH
-  set "RC=1"
-  goto :finish
-)
+if not exist "%LOGDIR%" mkdir "%LOGDIR%" >nul 2>nul
+if not exist "%LOGDIR%" goto :no_logdir
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $c = New-Object Net.Sockets.TcpClient; $c.Connect('%HOST%', %PORT%); $c.Close(); exit 0 } catch { exit 1 }"
-if not errorlevel 1 (
-  echo [INFO] æœåŠ¡å·²åœ¨è¿è¡Œ: %BASE%
-  set "RC=0"
-  goto :finish
-)
-
-echo [INFO] å¯åŠ¨æœåŠ¡ %BASE%  (æ—¥å¿—: logs\server.log)
-start "Newspaper Reader" /min cmd /c "%PY% -m newspaper_reader --host %HOST% --port %PORT% >> logs\server.log 2>&1"
-
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ok = $false; for ($i = 0; $i -lt 40; $i++) { try { $r = Invoke-WebRequest -Uri '%BASE%' -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode -eq 200) { $ok = $true; break } } catch {}; Start-Sleep -Milliseconds 500 }; if ($ok) { exit 0 } else { exit 1 }"
-if errorlevel 1 (
-  echo [ERROR] å¯åŠ¨å¤±è´¥ï¼Œè¯·æŸ¥çœ‹ logs\server.log
-  set "RC=1"
-  goto :finish
-)
-
-echo [OK] å¯åŠ¨æˆåŠŸ: %BASE%
-if "%OPEN%"=="1" start "" "%BASE%"
-
-:finish
-if "%QUIET%"=="1" exit /b %RC%
 echo.
-pause
+echo  Í¼Æ¬ÎÄ×ÖÔÄ¶ÁÆ÷ - Æô¶¯Ç°¼ì²é
+echo  ------------------------------------------------------------
+
+rem ---------- 1. ÕÒµ½¿ÉÓÃµÄ Python£¨Ìø¹ý Microsoft Store Õ¼Î»·û£©----------
+set "PY="
+for /f "delims=" %%P in ('where python 2^>nul ^| findstr /i /v "WindowsApps"') do if not defined PY set "PY=%%P"
+if not defined PY for /f "delims=" %%P in ('where py 2^>nul') do if not defined PY set "PY=%%P"
+if not defined PY goto :no_python
+
+%PY% -c "import sys" >nul 2>nul
+if errorlevel 1 goto :py_broken
+
+%PY% -c "import sys;print(sys.version.split()[0])" > "%TEMP%\np_pyver.txt" 2>nul
+set "PYVER="
+set /p PYVER=<"%TEMP%\np_pyver.txt"
+%PY% -c "import sys;sys.exit(0 if sys.version_info>=(3,11) else 1)" >nul 2>nul
+if errorlevel 1 goto :old_python
+echo  [OK] Python %PYVER%
+echo       %PY%
+
+rem ---------- 2. ÒÀÀµÊÇ·ñ×°Æë ----------
+%PY% -c "import fastapi,uvicorn,multipart,aiofiles,PIL,numpy,cv2,reportlab,pytesseract,pydantic,pymupdf" 1>"%TEMP%\newspaper_reader_deps.txt" 2>&1
+if errorlevel 1 goto :no_deps
+echo  [OK] Python ÒÀÀµÆëÈ«
+
+rem ---------- 3. Ê¶±ðÒýÇæ£¨È±Ê§²»×èÖ¹Æô¶¯£¬µ«×ª»»»áÃ»ÓÐÎÄ×Ö²ã£©----------
+set "TESS="
+if defined TESSERACT_CMD if exist "%TESSERACT_CMD%" set "TESS=%TESSERACT_CMD%"
+if not defined TESS if exist "%ProgramFiles%\Tesseract-OCR\tesseract.exe" set "TESS=%ProgramFiles%\Tesseract-OCR\tesseract.exe"
+if not defined TESS for /f "delims=" %%P in ('where tesseract 2^>nul') do if not defined TESS set "TESS=%%P"
+if not defined TESS goto :no_tess
+echo  [OK] Ê¶±ðÒýÇæ %TESS%
+
+rem ---------- 4. ¶Ë¿Ú×´Ì¬ ----------
+call :probe
+if "%PROBE%"=="0" goto :start_server
+if "%PROBE%"=="1" goto :already
+goto :port_busy
+
+:start_server
+if "%CHECK%"=="1" goto :check_done
+echo.
+echo  [..] ÕýÔÚÆô¶¯ %BASE%   (ÈÕÖ¾: %LOG%)
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$a=@('-m','newspaper_reader','--host','%HOST%','--port','%PORT%'); $p=Start-Process -FilePath '%PY%' -ArgumentList $a -WindowStyle Hidden -PassThru -RedirectStandardOutput '%LOGDIR%\server.stdout' -RedirectStandardError '%LOG%'; for($i=0;$i -lt 40;$i++){ if($p.HasExited){ exit 2 }; $c=New-Object Net.Sockets.TcpClient; try{ $c.Connect('%HOST%',%PORT%); $c.Close(); exit 0 }catch{ try{$c.Close()}catch{} }; Start-Sleep -Milliseconds 500 }; exit 1"
+set "WAITCODE=%errorlevel%"
+if "%WAITCODE%"=="0" goto :start_ok
+if "%WAITCODE%"=="2" goto :start_crashed
+goto :start_timeout
+
+:start_ok
+echo  [OK] Æô¶¯³É¹¦: %BASE%
+echo.
+echo  ä¯ÀÀÆ÷µØÖ·: %BASE%
+echo  Í£Ö¹·þÎñ:   Ë«»÷ stop.bat
+if "%OPEN%"=="1" start "" "%BASE%"
+goto :done
+
+:start_crashed
+echo.
+echo  [Ê§°Ü] ·þÎñ½ø³ÌÆô¶¯ºóÁ¢¿ÌÍË³öÁË£¨Ã»ÓÐ¼àÌý¶Ë¿Ú£©¡£
+goto :show_log
+
+:start_timeout
+echo.
+echo  [Ê§°Ü] ·þÎñ 30 ÃëÄÚÃ»ÓÐÏìÓ¦¡£
+goto :show_log
+
+:show_log
+echo  ------------------------------------------------------------
+echo  %LOG% µÄ×îºó 20 ÐÐ£º
+powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path -LiteralPath '%LOG%') { Get-Content -LiteralPath '%LOG%' -Tail 20 }"
+echo  ------------------------------------------------------------
+echo  ³£¼ûÔ­Òò£ºÒÀÀµ×°µ½ÁËÁíÒ»¸ö Python ÉÏ¡¢¶Ë¿Ú±»Õ¼ÓÃ¡¢Tesseract Â·¾¶²»¶Ô¡£
+echo  °ÑÉÏÃæÕâ¶Î±¨´í·¢³öÀ´¼´¿É¶¨Î»ÎÊÌâ¡£
+set "RC=1"
+goto :fail_end
+
+:already
+echo  [OK] ·þÎñÒÑÔÚÔËÐÐ: %BASE%
+if "%CHECK%"=="1" goto :check_done
+if "%OPEN%"=="1" start "" "%BASE%"
+goto :done
+
+:check_done
+echo.
+echo  ¼ì²éÍ¨¹ý£º»·¾³Âú×ãÒªÇó£¬¿ÉÒÔÖ±½ÓË«»÷ start.bat Æô¶¯·þÎñ¡£
+popd >nul
+if "%QUIET%"=="1" exit /b 0
+echo.
+echo  °´ÈÎÒâ¼ü¹Ø±Õ´°¿Ú...
+pause >nul
+exit /b 0
+
+rem ================= ³ö´íÊ±Í£×¡´°¿Ú£¬²»»áÉÁÍË =================
+
+:no_python
+echo.
+echo  [Ê§°Ü] Ã»ÓÐÕÒµ½ Python¡£
+echo         1) °²×° Python 3.11 »ò¸ü¸ß°æ±¾£¨python.org ¹Ù·½°²×°°ü£©
+echo         2) °²×°Ê±¹´Ñ¡ "Add python.exe to PATH"
+echo         3) ¹Øµô±¾´°¿Ú£¬ÖØÐÂË«»÷ start.bat
+set "RC=1"
+goto :fail_end
+
+:py_broken
+echo.
+echo  [Ê§°Ü] ÕÒµ½ÁË Python µ«ÎÞ·¨ÔËÐÐ: %PY%
+echo         Èç¹ûËüÊÇ Microsoft Store µÄÕ¼Î»·û£¬Çëµ½ python.org ÖØÐÂ°²×°¹Ù·½°æ±¾¡£
+set "RC=1"
+goto :fail_end
+
+:old_python
+echo.
+echo  [Ê§°Ü] Python °æ±¾¹ýµÍ: %PYVER%£¨ÐèÒª 3.11 »ò¸ü¸ß£©
+echo         ÇëÉý¼¶ Python ºóÖØÊÔ¡£
+set "RC=1"
+goto :fail_end
+
+:no_deps
+echo.
+echo  [Ê§°Ü] Python ÒÀÀµ²»ÍêÕû£¬¾ßÌåÈ±ÉÙµÄÄ£¿é£º
+echo  ------------------------------------------------------------
+type "%TEMP%\newspaper_reader_deps.txt"
+echo  ------------------------------------------------------------
+echo  ½â¾ö°ì·¨£ºÔÚ±¾Ä¿Â¼Ö´ÐÐ
+echo      %PY% -m pip install -r requirements.txt
+echo  ×°ÍêÖØÐÂË«»÷ start.bat¡£
+set "RC=1"
+goto :fail_end
+
+:no_tess
+echo  [¾¯¸æ] Ã»ÓÐÕÒµ½ Tesseract-OCR£º·þÎñÄÜÆô¶¯£¬µ«×ª»»³öµÄ PDF Ã»ÓÐ¿ÉËÑË÷ÎÄ×Ö²ã£¬
+echo         ½çÃæ»Õ±ê»áÏÔÊ¾¡¸Ê¶±ðÒýÇæÎ´¾ÍÐ÷¡¹¡£
+echo         °²×° Tesseract-OCR£¨¹´Ñ¡ÖÐÎÄ¼òÌåÓïÑÔ°ü chi_sim£©£¬Ä¬ÈÏÂ·¾¶
+echo         C:\Program Files\Tesseract-OCR\tesseract.exe£»»òÉèÖÃ»·¾³±äÁ¿ TESSERACT_CMD¡£
+echo  ------------------------------------------------------------
+call :probe
+if "%PROBE%"=="0" goto :start_server
+if "%PROBE%"=="1" goto :already
+goto :port_busy
+
+:port_busy
+echo.
+echo  [Ê§°Ü] ¶Ë¿Ú %PORT% ÒÑ±»ÆäËü³ÌÐòÕ¼ÓÃ£¨Õ¼ÓÃÕß²»ÊÇ±¾³ÌÐò£©¡£
+echo         Çë¹Ø±ÕÕ¼ÓÃ %PORT% µÄ³ÌÐò£¬»ò¸ÄÓÃÆäËü¶Ë¿ÚÆô¶¯£º
+echo             python -m newspaper_reader --port 9000
+set "RC=1"
+goto :fail_end
+
+:no_dir
+echo  [Ê§°Ü] ÎÞ·¨½øÈë½Å±¾ËùÔÚÄ¿Â¼: %~dp0
+echo         Çë°ÑÕû¸öÎÄ¼þ¼Ð·Åµ½±¾»ú´ÅÅÌ£¨²»ÒªÖ±½ÓÔÚÑ¹Ëõ°ü»òÍøÂçÎ»ÖÃÀïÔËÐÐ£©¡£
+set "RC=1"
+goto :fail_end
+
+:no_logdir
+echo  [Ê§°Ü] ÎÞ·¨´´½¨ logs Ä¿Â¼£¨È¨ÏÞ²»×ã»ò´ÅÅÌÖ»¶Á£©¡£
+set "RC=1"
+goto :fail_end
+
+:bad_arg
+echo  Î´Öª²ÎÊý: %BADARG%
+echo  ÓÃ·¨¼û: start.bat --help
+echo.
+set "RC=1"
+goto :fail_end
+
+:usage
+echo  ÓÃ·¨: start.bat [--check^|--no-open^|--quiet]
+echo     (ÎÞ²ÎÊý)   ¼ì²é»·¾³²¢Æô¶¯·þÎñ£¬È»ºó×Ô¶¯´ò¿ªä¯ÀÀÆ÷
+echo     --check    Ö»¼ì²é»·¾³£¨Python / ÒÀÀµ / Tesseract / ¶Ë¿Ú£©£¬²»Æô¶¯
+echo     --no-open  Æô¶¯µ«²»´ò¿ªä¯ÀÀÆ÷£¨²»ÔÝÍ££©
+echo     --quiet    Í¬ --no-open£¬±ãÓÚ½Å±¾µ÷ÓÃ
+popd >nul
+exit /b 0
+
+:fail_end
+echo.
+if "%QUIET%"=="1" (popd >nul & exit /b %RC%)
+echo  °´ÈÎÒâ¼ü¹Ø±Õ´°¿Ú...
+pause >nul
+popd >nul
 exit /b %RC%
+
+:done
+popd >nul
+if "%QUIET%"=="1" exit /b 0
+echo.
+echo  °´ÈÎÒâ¼ü¹Ø±Õ±¾´°¿Ú£¨·þÎñ»á¼ÌÐøÔÚºóÌ¨ÔËÐÐ£©...
+pause >nul
+exit /b 0
+
+rem ================= ×Ó³ÌÐò£º0=¶Ë¿Ú¿ÕÏÐ 1=±¾³ÌÐòÔÚÅÜ 2=±»ÆäËü³ÌÐòÕ¼ÓÃ =================
+:probe
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$l = @(Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue); if ($l.Count -eq 0) { exit 0 }; foreach ($id in ($l.OwningProcess | Sort-Object -Unique)) { $p = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $id) -ErrorAction SilentlyContinue; if ($p -and $p.CommandLine -and $p.CommandLine.Contains('newspaper_reader')) { exit 1 } }; exit 2"
+set "PROBE=%errorlevel%"
+exit /b 0

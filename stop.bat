@@ -1,24 +1,89 @@
 @echo off
-chcp 65001 >nul
+chcp 936 >nul
 setlocal EnableExtensions
+pushd "%~dp0" 2>nul
 
-set "HOST=127.0.0.1"
 set "PORT=8765"
 set "RC=0"
 set "QUIET=0"
-if not "%~1"=="" set "QUIET=1"
+set "FORCE=0"
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$l = Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue; if (-not $l) { Write-Output 'no listener'; exit 0 }; $ids = @($l.OwningProcess | Sort-Object -Unique); foreach ($p in $ids) { Stop-Process -Id $p -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 800; if (Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue) { Write-Output ('still running: ' + ($ids -join ',')); exit 1 } else { Write-Output ('stopped pid: ' + ($ids -join ',')); exit 0 }"
-if errorlevel 1 (
-  echo [ERROR] åœæ­¢å¤±è´¥ï¼Œè¯·æ‰‹åŠ¨ç»“æŸç›‘å¬ %PORT% ç«¯å£çš„è¿›ç¨‹
-  set "RC=1"
-  goto :finish
-)
-echo [OK] æœåŠ¡å·²åœæ­¢
+:parse
+if "%~1"=="" goto :run
+set "KNOWN=0"
+if /i "%~1"=="--quiet" (set "QUIET=1" & set "KNOWN=1")
+if /i "%~1"=="--force" (set "FORCE=1" & set "KNOWN=1")
+if /i "%~1"=="-h" goto :usage
+if /i "%~1"=="--help" goto :usage
+if "%KNOWN%"=="0" (set "BADARG=%~1" & goto :bad_arg)
+shift
+goto :parse
+
+:run
+call :kill own
+if "%KRC%"=="0" goto :not_running
+if "%KRC%"=="1" goto :stopped
+if "%KRC%"=="2" goto :foreign
+goto :still_running
+
+:foreign
+if "%FORCE%"=="1" goto :force
+echo.
+echo  [Ê§°Ü] ¶Ë¿Ú %PORT% ±»ÆäËü³ÌÐòÕ¼ÓÃ£¬Õ¼ÓÃÕß²»ÊÇ±¾·þÎñ£¬Î´×öÈÎºÎ²Ù×÷¡£
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue } | Sort-Object Id -Unique | Select-Object Id, ProcessName | Format-Table -AutoSize"
+echo         ÈçÈ·ÈÏÒªÇ¿ÖÆ½áÊøÕâÐ©³ÌÐò: stop.bat --force
+set "RC=1"
+goto :end
+
+:force
+echo  [¾¯¸æ] ÕýÔÚÇ¿ÖÆ½áÊøÕ¼ÓÃ¶Ë¿Ú %PORT% µÄÆäËü³ÌÐò¡­
+call :kill all
+if "%KRC%"=="0" goto :not_running
+if "%KRC%"=="1" goto :stopped
+goto :still_running
+
+:not_running
+echo  [ÐÅÏ¢] Ã»ÓÐÕýÔÚÔËÐÐµÄ·þÎñ£¨¶Ë¿Ú %PORT% ¿ÕÏÐ£©¡£
 set "RC=0"
+goto :end
 
-:finish
+:stopped
+echo  [OK] ·þÎñÒÑÍ£Ö¹£¬¶Ë¿Ú %PORT% ÒÑÊÍ·Å¡£
+set "RC=0"
+goto :end
+
+:still_running
+echo.
+echo  [Ê§°Ü] Í£Ö¹Ê§°Ü£¬¶Ë¿Ú %PORT% ÈÔ±»Õ¼ÓÃ¡£
+echo         ¿ÉÔÚÈÎÎñ¹ÜÀíÆ÷ÖÐ½áÊøÏà¹Ø python ½ø³Ì£¬»òÖØÆôµçÄÔºóÔÙÊÔ¡£
+set "RC=1"
+goto :end
+
+:bad_arg
+echo  Î´Öª²ÎÊý: %BADARG%
+echo  ÓÃ·¨¼û: stop.bat --help
+set "RC=1"
+goto :end
+
+:usage
+echo  ÓÃ·¨: stop.bat [--quiet^|--force]
+echo     (ÎÞ²ÎÊý)  Í£Ö¹±¾³ÌÐòµÄ·þÎñ£»¶Ë¿Ú±»ÆäËü³ÌÐòÕ¼ÓÃÊ±²»Ö´ÐÐÈÎºÎ²Ù×÷
+echo     --quiet   ²»ÔÝÍ££¬Ö±½ÓÓÃ·µ»ØÂë±íÊ¾½á¹û
+echo     --force   Ç¿ÖÆ½áÊøÕ¼ÓÃ¶Ë¿Ú %PORT% µÄ³ÌÐò£¨ÓÐ·çÏÕ£¬È·ÈÏºóÊ¹ÓÃ£©
+popd >nul
+exit /b 0
+
+:end
+popd >nul
 if "%QUIET%"=="1" exit /b %RC%
 echo.
-pause
+echo  °´ÈÎÒâ¼ü¹Ø±Õ´°¿Ú...
+pause >nul
 exit /b %RC%
+
+rem ============ ×Ó³ÌÐò£ºmode=own Ö»Í£±¾³ÌÐò£»mode=all Í£ËùÓÐÕ¼ÓÃÕß ============
+rem KRC: 0=¶Ë¿Ú¿ÕÏÐ 1=ÒÑÍ£Ö¹ 2=±»ÆäËü³ÌÐòÕ¼ÓÃ£¨own Ä£Ê½£© 3=Í£Ö¹Ê§°Ü
+:kill
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$mode='%~1'; $l=@(Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue); if($l.Count -eq 0){exit 0}; $ids=@($l.OwningProcess | Sort-Object -Unique); $ours=@(); foreach($id in $ids){ $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$id) -ErrorAction SilentlyContinue; if($p -and $p.CommandLine -and $p.CommandLine.Contains('newspaper_reader')){ $ours += $id } }; if($mode -ne 'all' -and $ours.Count -eq 0){exit 2}; $target = $ids; if($mode -ne 'all'){ $target = $ours }; foreach($id in $target){ Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 900; if(Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue){exit 3}; exit 1"
+set "KRC=%errorlevel%"
+exit /b 0
